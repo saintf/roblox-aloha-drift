@@ -139,7 +139,15 @@ function EconomyService:start()
     end
 
     playerData[player.UserId] = data
-    RemoteEvents.EconomyUpdate:FireClient(player, data.personalCoins, data.roleXP)
+
+    -- Include factionId on the initial fire so the client can colour its treasury panel.
+    -- FactionService.start() runs before EconomyService.start() in the bootstrap order,
+    -- so the faction should already be assigned. Warn if not (race on very fast joins).
+    local factionId = FactionService.getFaction and FactionService.getFaction(player) or nil
+    if not factionId then
+      warn("[EconomyService] loadPlayer: factionId nil for", player.Name, "— client treasury swatch will be grey")
+    end
+    RemoteEvents.EconomyUpdate:FireClient(player, data.personalCoins, data.roleXP, factionId)
   end
 
   Players.PlayerAdded:Connect(loadPlayer)
@@ -188,11 +196,16 @@ function EconomyService.awardCoins(player, amount, source)
   data.personalCoins += personalShare
   EconomyService.log.info("awardCoins", player.Name, personalShare, "personal /", factionShare, "faction | source:", source)
 
-  -- Route faction share to FactionService (implemented in Milestone 4)
+  -- Route faction share to FactionService
   if FactionService.getPlayerFaction and FactionService.addToTreasury then
     local factionId = FactionService.getPlayerFaction(player)
     if factionId then
-      FactionService.addToTreasury(factionId, factionShare, source)
+      FactionService.addToTreasury(player, factionShare)
+      -- Broadcast updated treasury to all members of this faction
+      local treasury = FactionService.getTreasury and FactionService.getTreasury(factionId) or 0
+      for _, member in ipairs(FactionService.getPlayersInFaction(factionId)) do
+        RemoteEvents.FactionUpdate:FireClient(member, treasury, {})
+      end
     end
   end
 
@@ -233,10 +246,10 @@ end
 -- Adds coins directly to a faction treasury (e.g. platform drip income).
 -- Does NOT split — caller is responsible for the amount.
 function EconomyService.transferToFaction(factionId, amount, source)
-  if FactionService.addToTreasury then
-    FactionService.addToTreasury(factionId, amount, source)
+  if FactionService.addToTreasuryById then
+    FactionService.addToTreasuryById(factionId, amount)
   else
-    EconomyService.log.debug("transferToFaction: FactionService.addToTreasury not yet implemented | factionId:", factionId, "amount:", amount, "source:", source)
+    EconomyService.log.debug("transferToFaction: FactionService not yet implemented | factionId:", factionId, "amount:", amount, "source:", source)
   end
 end
 
