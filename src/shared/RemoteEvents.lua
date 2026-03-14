@@ -47,6 +47,14 @@ local REMOTES = {
   -- World event: server announces a world event to all clients
   -- Payload: (eventType: string, timeRemaining: number)
   WorldEventAnnounce = "RemoteEvent",
+
+  -- Vehicle: client requests to spawn their vehicle
+  -- Payload: (vehicleId: string)
+  VehicleSpawnRequest = "RemoteEvent",
+
+  -- Vehicle: client requests to dismount from their current vehicle
+  -- Payload: none
+  VehicleDismountRequest = "RemoteEvent",
 }
 
 -- Create or find the container folder

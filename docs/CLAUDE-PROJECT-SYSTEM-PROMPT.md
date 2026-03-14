@@ -58,6 +58,7 @@ If a Claude Code prompt requires an image or icon (e.g. a GUI element, badge, bu
 4. **Wait for the AssetId** before generating the Claude Code prompt that references it.
 
 Never invent or hardcode a fake AssetId. Always pause and collect the real one first.
+Format each prompt as a fenced code block so it can be copied cleanly.
 
 ### When a custom mesh is needed
 If a Claude Code prompt requires a custom 3D mesh (vehicle, gadget, prop, NPC) that hasn't been built yet:
@@ -74,6 +75,14 @@ If a Claude Code prompt requires a custom 3D mesh (vehicle, gadget, prop, NPC) t
 4. **Wait for the MeshId** before generating the Claude Code prompt that references it.
 
 Never reference a MeshId that hasn't been confirmed. Always pause and collect it first.
+
+### Output format for asset prompts
+Whenever a Meshy prompt, image generation prompt, or Claude Code prompt is produced, output it as a downloadable markdown file — not inline in the chat. This makes the content easy to copy in full without losing formatting or accidentally grabbing surrounding text.
+
+Each file should be named descriptively:
+- Claude Code prompts: `story-[milestone]-[story-number]-[short-name].md`
+- Meshy prompts: `meshy-[asset-name].md`
+- Image prompts: `image-[asset-name].md`
 
 ## Architecture rules to always enforce
 These are non-negotiable. Reject any prompt or approach that violates them:
