@@ -13,8 +13,9 @@ local DisplacementService = BaseService.new("DisplacementService")
 
 -- Config: all tunable numbers live here — never buried in function bodies below
 local CFG = {
-  OCEAN_DELAY      = 5,   -- seconds before teleport after ocean contact
-  SPAWN_INVINCIBLE = 3,   -- seconds of invincibility granted on spawn arrival
+  OCEAN_DELAY      = 5,    -- seconds of wonder window before teleport
+  SPAWN_INVINCIBLE = 3,    -- seconds of invincibility on arrival
+  SPAWN_POSITION   = CFrame.new(0, 184, 0),  -- top of SolarisIsland + character height offset
   WIND             = WindConfig,
 }
 
@@ -33,10 +34,11 @@ function DisplacementService:start()
 
   Players.PlayerAdded:Connect(function(player)
     playerState[player.UserId] = {
-      windHits        = 0,
-      firstHitTime    = 0,
-      invincible      = false,
-      invincibleUntil = 0,
+      windHits         = 0,
+      firstHitTime     = 0,
+      invincible       = false,
+      invincibleUntil  = 0,
+      isBeingDisplaced = false,
     }
     self.log.debug("state created for", player.Name)
   end)
@@ -55,26 +57,67 @@ function DisplacementService.onWindHit(player, firerTeam)
 end
 
 -- Called when a player's character touches the ocean surface.
--- Fires OceanContact remote so the client can play underwater VFX (Story 4).
--- Teleport logic will be added in the teleportHome story.
+-- Starts a wonder window (CFG.OCEAN_DELAY seconds) then teleports home.
+-- Fires OceanContact remote immediately so UnderwaterFX can react (Story 4).
 function DisplacementService.onOceanContact(player)
-  print("[DisplacementService] onOceanContact:", player.Name)
-  -- Notify client to trigger underwater VFX (implemented in Story 4)
+  local state = playerState[player.UserId]
+  if not state or state.isBeingDisplaced then return end
+  state.isBeingDisplaced = true
+
   RemoteEvents.OceanContact:FireClient(player)
+
+  task.delay(CFG.OCEAN_DELAY, function()
+    if not player.Parent then return end  -- player left during delay
+    DisplacementService.teleportHome(player)
+  end)
 end
 
 -- Called when a player falls below the world boundary (KillPlane contact).
--- Routes to teleportHome once that is implemented.
+-- No wonder window — teleport is immediate.
 function DisplacementService.onBelowWorldBoundary(player)
-  print("[DisplacementService] onBelowWorldBoundary:", player.Name)
-  -- TODO: call teleportHome(player) in Milestone 1, Story — teleportHome
+  local state = playerState[player.UserId]
+  if not state or state.isBeingDisplaced then return end
+  state.isBeingDisplaced = true
+  DisplacementService.teleportHome(player)
 end
 
--- Teleports player to their faction's home spawn and grants invincibility.
--- This is the single authoritative path for all player teleportation.
--- TODO: implement in Milestone 1, Story — teleportHome
+-- Teleports player to their faction's home spawn and grants spawn invincibility.
+-- This is the ONLY function permitted to move a player's CFrame. No other script teleports.
+-- ZoneService will route to the correct faction spawn in Milestone 4 — for now uses CFG.SPAWN_POSITION.
 function DisplacementService.teleportHome(player)
-  -- stub
+  local character = player.Character
+  if not character then return end
+
+  local hrp = character:FindFirstChild("HumanoidRootPart")
+  if not hrp then return end
+
+  hrp.CFrame = CFG.SPAWN_POSITION
+
+  DisplacementService.grantInvincibility(player, CFG.SPAWN_INVINCIBLE)
+
+  -- Notify client to play spawn shimmer VFX (wired in Story 5)
+  RemoteEvents.DisplacementOccurred:FireClient(player)
+
+  -- Reset displacement flag after a short buffer so re-entry can be detected
+  task.delay(0.5, function()
+    local state = playerState[player.UserId]
+    if state then state.isBeingDisplaced = false end
+  end)
+
+  print("[DisplacementService] teleportHome:", player.Name)
+end
+
+-- Grants invincibility to a player for duration seconds, then clears it.
+-- Used by GadgetService to skip push/loot logic during the spawn window.
+function DisplacementService.grantInvincibility(player, duration)
+  local state = playerState[player.UserId]
+  if not state then return end
+  state.invincible      = true
+  state.invincibleUntil = os.clock() + duration
+  task.delay(duration, function()
+    local s = playerState[player.UserId]
+    if s then s.invincible = false end
+  end)
 end
 
 -- Returns true if the player is currently within their spawn invincibility window.
