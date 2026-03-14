@@ -142,13 +142,13 @@ function UnderwaterFX:start()
       tween(shimmerOverlay, { BackgroundTransparency = 1 }, 0.6)
     end)
 
-    -- Chime sound
-    local chime = Instance.new("Sound")
-    chime.SoundId = "rbxassetid://172268609"  -- placeholder chime
-    chime.Volume  = 0.7
-    chime.Parent  = camera
-    chime:Play()
-    game:GetService("Debris"):AddItem(chime, 3)
+    -- TODO: arrival chime — swap in a real asset ID when available
+    -- local chime = Instance.new("Sound")
+    -- chime.SoundId = "rbxassetid://TODO"
+    -- chime.Volume  = 0.7
+    -- chime.Parent  = camera
+    -- chime:Play()
+    -- game:GetService("Debris"):AddItem(chime, 3)
 
     -- "✦ Home" label — fade in, then out
     tween(homeLabel, { TextTransparency = 0 }, 0.15)

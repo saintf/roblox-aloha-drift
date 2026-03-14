@@ -32,7 +32,8 @@ end
 function DisplacementService:start()
   local Players = game:GetService("Players")
 
-  Players.PlayerAdded:Connect(function(player)
+  local function initPlayer(player)
+    if playerState[player.UserId] then return end  -- already initialised
     playerState[player.UserId] = {
       windHits         = 0,
       firstHitTime     = 0,
@@ -41,12 +42,19 @@ function DisplacementService:start()
       isBeingDisplaced = false,
     }
     self.log.debug("state created for", player.Name)
-  end)
+  end
 
+  Players.PlayerAdded:Connect(initPlayer)
   Players.PlayerRemoving:Connect(function(player)
     playerState[player.UserId] = nil
     self.log.debug("state removed for", player.Name)
   end)
+
+  -- Handle players already in the game when this service starts.
+  -- In Play Solo the local player is present before PlayerAdded fires.
+  for _, player in ipairs(Players:GetPlayers()) do
+    initPlayer(player)
+  end
 end
 
 -- Called when a Wind Blaster hits this player.

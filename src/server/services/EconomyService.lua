@@ -24,10 +24,9 @@ local CFG = {
 }
 
 -- In-memory player data (loaded from DataStore on join)
-local playerData = {}
-local lastSaved  = {}  -- UserId → os.clock() of last DataStore write
-
-local playerStore = DataStoreService:GetDataStore(CFG.DATASTORE_NAME)
+local playerData  = {}
+local lastSaved   = {}  -- UserId → os.clock() of last DataStore write
+local playerStore = nil -- initialised in init() so a DataStore error doesn't crash the require
 
 -- Schema for new players and for forward migration of existing saves
 local DEFAULT_DATA = {
@@ -81,6 +80,7 @@ end
 
 -- Saves one player's data if the debounce window has passed.
 local function savePlayer(player)
+  if not playerStore then return end  -- DataStore unavailable (Studio without API access)
   local userId = player.UserId
   local data   = playerData[userId]
   if not data then return end
@@ -103,14 +103,28 @@ end
 -- ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 function EconomyService:init()
+  local ok, result = pcall(function()
+    playerStore = DataStoreService:GetDataStore(CFG.DATASTORE_NAME)
+  end)
+  if not ok then
+    warn("[EconomyService] DataStore unavailable (Studio API access may be off): " .. tostring(result))
+    -- playerStore stays nil; savePlayer/loadPlayer will no-op safely
+  end
 end
 
 function EconomyService:start()
-  -- Load data when a player joins
-  Players.PlayerAdded:Connect(function(player)
-    local ok, result = pcall(function()
-      return playerStore:GetAsync(player.UserId)
-    end)
+  -- Load data for one player (called for both PlayerAdded and already-connected players)
+  local function loadPlayer(player)
+    if playerData[player.UserId] then return end  -- already loaded
+
+    local ok, result
+    if playerStore then
+      ok, result = pcall(function()
+        return playerStore:GetAsync(player.UserId)
+      end)
+    else
+      ok, result = true, nil  -- no DataStore: treat as new player
+    end
 
     local data
     if not ok then
@@ -125,10 +139,16 @@ function EconomyService:start()
     end
 
     playerData[player.UserId] = data
-
-    -- Push current economy state to the joining player's HUD
     RemoteEvents.EconomyUpdate:FireClient(player, data.personalCoins, data.roleXP)
-  end)
+  end
+
+  Players.PlayerAdded:Connect(loadPlayer)
+
+  -- Handle players already in the game when this service starts.
+  -- In Play Solo the local player is present before PlayerAdded fires.
+  for _, player in ipairs(Players:GetPlayers()) do
+    task.spawn(loadPlayer, player)  -- task.spawn so DataStore calls don't block the loop
+  end
 
   -- Save and clean up when a player leaves
   Players.PlayerRemoving:Connect(function(player)

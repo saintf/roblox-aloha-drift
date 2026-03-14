@@ -15,21 +15,38 @@
 --   7. BountyService    — depends on EconomyService
 --   8. EventScheduler   — depends on EconomyService, FactionService
 
-local services = {
-  require(script.services.ZoneService),
-  require(script.services.FactionService),
-  require(script.services.EconomyService),
-  require(script.services.DisplacementService),
-  require(script.services.GadgetService),
-  require(script.services.VehicleService),
-  require(script.services.BountyService),
-  require(script.services.EventScheduler),
+local servicePaths = {
+  script.services.ZoneService,
+  script.services.FactionService,
+  script.services.EconomyService,
+  script.services.DisplacementService,
+  script.services.GadgetService,
+  script.services.VehicleService,
+  script.services.BountyService,
+  script.services.EventScheduler,
 }
 
-for _, service in ipairs(services) do
-  service:init()
+-- Require each service individually so one failure doesn't abort the rest
+local services = {}
+for _, path in ipairs(servicePaths) do
+  local ok, result = pcall(require, path)
+  if ok then
+    table.insert(services, result)
+  else
+    warn("[init.server] Failed to require service '" .. tostring(path) .. "': " .. tostring(result))
+  end
 end
 
 for _, service in ipairs(services) do
-  service:_start()
+  local ok, err = pcall(function() service:init() end)
+  if not ok then
+    warn("[init.server] Error in " .. tostring(service.name) .. ":init() — " .. tostring(err))
+  end
+end
+
+for _, service in ipairs(services) do
+  local ok, err = pcall(function() service:_start() end)
+  if not ok then
+    warn("[init.server] Error in " .. tostring(service.name) .. ":_start() — " .. tostring(err))
+  end
 end

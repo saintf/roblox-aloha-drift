@@ -1,5 +1,6 @@
 {
   "name": "AlohaD rift",
+  "globIgnorePaths": ["**/_Index/**"],
   "tree": {
     "$className": "DataModel",
     "ServerScriptService": {
@@ -8,10 +9,13 @@
         "$path": "src/server"
       }
     },
-    "StarterPlayerScripts": {
-      "$className": "StarterPlayerScripts",
-      "AlohaClient": {
-        "$path": "src/client"
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "AlohaClient": {
+          "$path": "src/client"
+        }
       }
     },
     "ReplicatedStorage": {
