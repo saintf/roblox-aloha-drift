@@ -93,9 +93,35 @@ function DisplacementService.teleportHome(player)
 
   hrp.CFrame = CFG.SPAWN_POSITION
 
+  -- Enforce invincibility window by restoring health on any damage taken
+  local humanoid = character:FindFirstChildOfClass("Humanoid")
+  if humanoid then
+    local conn
+    conn = humanoid.HealthChanged:Connect(function()
+      if DisplacementService.isInvincible(player) then
+        humanoid.Health = humanoid.MaxHealth
+      else
+        conn:Disconnect()
+      end
+    end)
+  end
+
   DisplacementService.grantInvincibility(player, CFG.SPAWN_INVINCIBLE)
 
-  -- Notify client to play spawn shimmer VFX (wired in Story 5)
+  -- Gold particle shimmer visible to all players for the invincibility duration
+  local shimmer = Instance.new("ParticleEmitter")
+  shimmer.Color       = ColorSequence.new(Color3.fromRGB(255, 220, 80))
+  shimmer.Size        = NumberSequence.new(0.3)
+  shimmer.Lifetime    = NumberRange.new(0.5, 1.0)
+  shimmer.Rate        = 40
+  shimmer.SpreadAngle = Vector2.new(180, 180)
+  shimmer.Parent      = hrp
+
+  task.delay(CFG.SPAWN_INVINCIBLE, function()
+    if shimmer and shimmer.Parent then shimmer:Destroy() end
+  end)
+
+  -- Notify client to play gold screen flash and "✦ Home" label (Story 4 / Story 5)
   RemoteEvents.DisplacementOccurred:FireClient(player)
 
   -- Reset displacement flag after a short buffer so re-entry can be detected
