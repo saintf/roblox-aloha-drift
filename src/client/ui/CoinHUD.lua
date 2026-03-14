@@ -2,9 +2,6 @@
 -- Builds the coin counter ScreenGui. Returns { gui, coinLabel }.
 -- Call CoinHUD.create() once on init — do not call it on every respawn.
 --
--- To replace the emoji coin icon with a real asset later:
---   1. Delete the icon TextLabel
---   2. Add an ImageLabel at the same Size/Position with your asset ID
 
 local CoinHUD = {}
 
@@ -28,14 +25,13 @@ function CoinHUD.create()
   corner.CornerRadius = UDim.new(0, 10)
   corner.Parent       = frame
 
-  -- Coin icon — emoji placeholder, swap for ImageLabel + asset ID when ready
-  local icon = Instance.new("TextLabel")
+  local icon = Instance.new("ImageLabel")
   icon.Name                   = "CoinIcon"
-  icon.Size                   = UDim2.new(0, 32, 1, 0)
-  icon.Position               = UDim2.new(0, 8, 0, 0)
+  icon.Size                   = UDim2.new(0, 32, 0, 32)
+  icon.Position               = UDim2.new(0, 6, 0.5, -16)
   icon.BackgroundTransparency = 1
-  icon.Text                   = "🪙"
-  icon.TextScaled             = true
+  icon.Image                  = "rbxassetid://107987096866122"
+  icon.ScaleType              = Enum.ScaleType.Fit
   icon.Parent                 = frame
 
   -- Coin count label — updated by HUDController on EconomyUpdate

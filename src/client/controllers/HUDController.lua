@@ -48,7 +48,7 @@ function HUDController:start()
   -- FactionUpdate: (treasury, perks) — broadcast to all faction members after each earn
   RemoteEvents.FactionUpdate.OnClientEvent:Connect(function(treasury, _perks)
     if treasuryRefs then
-      treasuryRefs.treasuryLabel.Text = "🏦 " .. tostring(treasury)
+      treasuryRefs.treasuryLabel.Text = tostring(treasury)
     end
   end)
 end

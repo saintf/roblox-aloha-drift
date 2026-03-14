@@ -60,13 +60,23 @@ function TreasuryHUD.create()
   factionLabel.TextScaled             = true
   factionLabel.Parent                 = frame
 
-  -- Treasury amount (larger, bottom half)
+  -- Treasury icon
+  local treasuryIcon = Instance.new("ImageLabel")
+  treasuryIcon.Name                   = "TreasuryIcon"
+  treasuryIcon.Size                   = UDim2.new(0, 20, 0, 20)
+  treasuryIcon.Position               = UDim2.new(0, 14, 0.5, -4)
+  treasuryIcon.BackgroundTransparency = 1
+  treasuryIcon.Image                  = "rbxassetid://118547822094627"
+  treasuryIcon.ScaleType              = Enum.ScaleType.Fit
+  treasuryIcon.Parent                 = frame
+
+  -- Treasury amount (number only)
   local treasuryLabel = Instance.new("TextLabel")
   treasuryLabel.Name                   = "TreasuryLabel"
-  treasuryLabel.Size                   = UDim2.new(1, -16, 0.5, 0)
-  treasuryLabel.Position               = UDim2.new(0, 14, 0.48, 0)
+  treasuryLabel.Size                   = UDim2.new(1, -42, 0.5, 0)
+  treasuryLabel.Position               = UDim2.new(0, 38, 0.48, 0)
   treasuryLabel.BackgroundTransparency = 1
-  treasuryLabel.Text                   = "🏦 0"
+  treasuryLabel.Text                   = "0"
   treasuryLabel.TextColor3             = Color3.fromRGB(255, 255, 255)
   treasuryLabel.TextXAlignment         = Enum.TextXAlignment.Left
   treasuryLabel.Font                   = Enum.Font.GothamBold
@@ -77,6 +87,7 @@ function TreasuryHUD.create()
     gui           = screenGui,
     frame         = frame,
     swatch        = swatch,
+    treasuryIcon  = treasuryIcon,
     treasuryLabel = treasuryLabel,
     factionLabel  = factionLabel,
     factionColors = FACTION_COLORS,
