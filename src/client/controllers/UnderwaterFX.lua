@@ -22,7 +22,6 @@ local CFG = {
   CAMERA_ROLL_DEG    = 5,                             -- degrees of Z-axis camera roll
   CAMERA_ROLL_TIME   = 0.5,                           -- seconds to reach max roll
   CAMERA_RETURN_TIME = 2.0,                           -- seconds to return camera to upright
-  BUBBLE_SOUND_ID    = "rbxassetid://131070686",      -- placeholder bubble sound
 }
 
 -- UI references — created in init(), used in start()
@@ -91,12 +90,6 @@ end
 function UnderwaterFX:start()
   local camera = workspace.CurrentCamera
 
-  local bubbleSound = Instance.new("Sound")
-  bubbleSound.SoundId = CFG.BUBBLE_SOUND_ID
-  bubbleSound.Volume  = 0.6
-  bubbleSound.Looped  = false
-  bubbleSound.Parent  = camera
-
   local function tween(obj, props, duration)
     local info = TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
     TweenService:Create(obj, info, props):Play()
@@ -116,10 +109,7 @@ function UnderwaterFX:start()
     -- 1. Teal tint
     tween(tealOverlay, { BackgroundTransparency = CFG.TINT_ALPHA }, CFG.TINT_IN_TIME)
 
-    -- 2. Bubble sound
-    bubbleSound:Play()
-
-    -- 3. Gentle camera roll then return — purely cosmetic
+    -- 2. Gentle camera roll then return — purely cosmetic
     local rollRad = math.rad(CFG.CAMERA_ROLL_DEG)
     tween(camera, { CFrame = camera.CFrame * CFrame.Angles(0, 0, rollRad) }, CFG.CAMERA_ROLL_TIME)
     task.delay(CFG.CAMERA_ROLL_TIME, function()
