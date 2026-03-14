@@ -3,6 +3,7 @@
 -- Calls EconomyService.awardCoins() — no coin logic lives here.
 
 local Players    = game:GetService("Players")
+local RunService = game:GetService("RunService")
 
 local EconomyService = require(game.ServerScriptService.AlohaServer.services.EconomyService)
 
@@ -28,12 +29,31 @@ local orbPart = orbModel:WaitForChild("OrbPart")
 local function hideOrb()
   orbPart.Transparency = 1
   orbPart.CanCollide   = false
+  local light = orbPart:FindFirstChild("OrbLight")
+  if light then light.Enabled = false end
+  local bb = orbPart:FindFirstChild("OrbBillboard")
+  if bb then bb.Enabled = false end
 end
 
 local function showOrb()
   orbPart.Transparency = 0
   orbPart.CanCollide   = false  -- always false; Touched fires regardless of CanCollide on the hitting part
+  local light = orbPart:FindFirstChild("OrbLight")
+  if light then light.Enabled = true end
+  local bb = orbPart:FindFirstChild("OrbBillboard")
+  if bb then bb.Enabled = true end
 end
+
+-- Bob animation: runs continuously, only visually active when orb is visible
+local BOB_AMPLITUDE = 0.3   -- studs up/down
+local BOB_SPEED     = 1.8   -- cycles per second
+local BASE_Y        = orbPart.Position.Y
+
+RunService.Heartbeat:Connect(function()
+  if orbPart.Transparency == 1 then return end  -- skip when hidden
+  local offset = math.sin(tick() * BOB_SPEED * math.pi * 2) * BOB_AMPLITUDE
+  orbPart.CFrame = CFrame.new(orbPart.Position.X, BASE_Y + offset, orbPart.Position.Z)
+end)
 
 local function respawnAfterDelay()
   task.delay(CFG.RESPAWN_DELAY, function()

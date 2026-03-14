@@ -31,12 +31,29 @@ part.CanCollide   = false
 part.CastShadow   = false
 part.Parent       = model
 
--- Spinning highlight ring
-local selectionBox = Instance.new("SelectionSphere")
-selectionBox.Adornee             = part
-selectionBox.Color3              = Color3.fromRGB(255, 255, 200)
-selectionBox.SurfaceTransparency = 0.7
-selectionBox.Parent              = part
+local light = Instance.new("PointLight")
+light.Name       = "OrbLight"
+light.Brightness = 3
+light.Range      = 16
+light.Color      = Color3.fromRGB(255, 220, 100)  -- warm gold
+light.Parent     = part
+
+local billboard = Instance.new("BillboardGui")
+billboard.Name           = "OrbBillboard"
+billboard.Size           = UDim2.new(0, 60, 0, 24)
+billboard.StudsOffset    = Vector3.new(0, 2.5, 0)
+billboard.AlwaysOnTop    = false
+billboard.LightInfluence = 0
+billboard.Parent         = part
+
+local label = Instance.new("TextLabel")
+label.Size                   = UDim2.new(1, 0, 1, 0)
+label.BackgroundTransparency = 1
+label.Text                   = "COINS"
+label.TextColor3             = Color3.fromRGB(255, 230, 80)
+label.Font                   = Enum.Font.GothamBold
+label.TextScaled             = true
+label.Parent                 = billboard
 
 model.PrimaryPart = part
 model.Parent      = workspace
