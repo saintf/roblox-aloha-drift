@@ -1,19 +1,19 @@
 -- VehicleService.lua
--- Manages vehicle ownership, spawning, mounting, and dismount.
+-- Manages vehicle ownership, spawning, mounting, dismount, and hover physics.
 -- Server-authoritative — clients request via RemoteEvents, server validates and executes.
 --
--- Story 1: spawn / mount / dismount / destroy. No physics, no input, no recall.
+-- Story 1: spawn / mount / dismount / destroy.
+-- Story 2: altitude hold, idle bob, velocity tilt, max speed cap (server Heartbeat loop).
 -- Depends on: VehicleConfig, FactionService (optional — for faction colour)
 
 local CollectionService = game:GetService("CollectionService")
 local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")
 
 local BaseService    = require(game.ReplicatedStorage.AlohaShared.classes.BaseService)
 local RemoteEvents   = require(game.ReplicatedStorage.AlohaShared.RemoteEvents)
 local VehicleConfig  = require(game.ReplicatedStorage.AlohaShared.config.VehicleConfig)
 local FactionConfig  = require(game.ReplicatedStorage.AlohaShared.config.FactionConfig)
-
--- Optional dependency — guards in awardCoins-style; won't crash if not yet bootstrapped.
 local FactionService = require(script.Parent.FactionService)
 
 local VehicleService = BaseService.new("VehicleService")
@@ -24,9 +24,11 @@ local CONFIG = {
 }
 
 -- ── Internal state ────────────────────────────────────────────────────────────
-local _vehicles   = {}  -- [player] = Model | nil
-local _mounted    = {}  -- [player] = boolean
-local _lastRemote = {}  -- [player] = tick()
+local _vehicles           = {}  -- [player] = Model | nil
+local _mounted            = {}  -- [player] = boolean
+local _lastRemote         = {}  -- [player] = tick()
+local _physicsConnections = {}  -- [player] = RBXScriptConnection
+local _vehicleTypes       = {}  -- [player] = vehicleId string (for cfg lookup in loop)
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -47,32 +49,32 @@ local function factionColourFor(player)
       return faction.primaryColor
     end
   end
-  return Color3.fromRGB(255, 165, 80)  -- fallback: warm orange
+  return Color3.fromRGB(255, 165, 80)
 end
 
--- Builds a procedural placeholder hover-bike model for `player`.
--- Returns the Model (not yet parented — caller does that).
+-- Builds a procedural placeholder hover-bike model and parents it to workspace.
+-- Returns the Model with PrimaryPart set and all parts welded.
 local function _buildPlaceholderBike(player, spawnCFrame)
   local colour = factionColourFor(player)
 
   local model = Instance.new("Model")
   model.Name = "HoverBike_" .. player.Name
 
-  -- RootPart — main body
+  -- RootPart — main body (anchored during setup, unanchored after welds)
   local root = Instance.new("Part")
-  root.Name     = "RootPart"
-  root.Size     = Vector3.new(8, 3, 16)
-  root.Color    = colour
-  root.Material = Enum.Material.SmoothPlastic
-  root.Anchored = true        -- anchored until physics (Story 2) takes over
+  root.Name       = "RootPart"
+  root.Size       = Vector3.new(8, 3, 16)
+  root.Color      = colour
+  root.Material   = Enum.Material.SmoothPlastic
+  root.Anchored   = true
   root.CastShadow = true
-  root.Parent   = model
+  root.Parent     = model
 
   -- Engine pod — left
   local podL = Instance.new("Part")
   podL.Name     = "Pod_L"
   podL.Shape    = Enum.PartType.Cylinder
-  podL.Size     = Vector3.new(4, 3, 3)   -- Cylinder: X=length, Y/Z=diameter (r=1.5)
+  podL.Size     = Vector3.new(4, 3, 3)
   podL.Color    = Color3.fromRGB(60, 60, 60)
   podL.Material = Enum.Material.Metal
   podL.Anchored = true
@@ -96,27 +98,23 @@ local function _buildPlaceholderBike(player, spawnCFrame)
   seat.Anchored = true
   seat.Parent   = model
 
-  -- Thruster attachment (used by Story 2 for VectorForce)
+  -- Attachment for physics constraints (Story 2)
   local attach = Instance.new("Attachment")
   attach.Name   = "ThrusterAttach"
   attach.Parent = root
 
-  -- Set PrimaryPart before pivoting so relative offsets work
   model.PrimaryPart = root
-
-  -- Parent to workspace and pivot to spawn position
-  model.Parent = workspace
+  model.Parent      = workspace
   model:PivotTo(spawnCFrame)
 
-  -- Now position parts relative to root's world CFrame
+  -- Position parts relative to root's world CFrame, then weld
   local rootCF = root.CFrame
   podL.CFrame  = rootCF * CFrame.new(-4, -1, 0)
   podR.CFrame  = rootCF * CFrame.new( 4, -1, 0)
   seat.CFrame  = rootCF * CFrame.new( 0,  1.5, -2)
 
-  -- Weld parts to root so the model moves as one piece
   local function weld(part)
-    local w = Instance.new("WeldConstraint")
+    local w  = Instance.new("WeldConstraint")
     w.Part0  = root
     w.Part1  = part
     w.Parent = root
@@ -125,7 +123,7 @@ local function _buildPlaceholderBike(player, spawnCFrame)
   weld(podR)
   weld(seat)
 
-  -- Now safe to unanchor; WeldConstraints keep geometry together
+  -- Safe to unanchor now — WeldConstraints keep geometry together
   root.Anchored = false
   podL.Anchored = false
   podR.Anchored = false
@@ -141,14 +139,84 @@ local function spawnCFrameFor(player)
   local char = player.Character
   local hrp  = char and char:FindFirstChild("HumanoidRootPart")
   if not hrp then
-    -- Fallback: world origin if character isn't loaded yet
     return CFrame.new(0, 10, 0)
   end
-  -- Project CONFIG.SPAWN_OFFSET along the HRP's look direction
   local lookUnit = hrp.CFrame.LookVector
   local offset   = lookUnit * CONFIG.SPAWN_OFFSET.Z
                  + Vector3.new(0, CONFIG.SPAWN_OFFSET.Y, 0)
   return CFrame.new(hrp.Position + offset) * CFrame.Angles(0, math.atan2(-lookUnit.X, -lookUnit.Z), 0)
+end
+
+-- Creates the VectorForce + AlignOrientation constraints and starts the
+-- per-vehicle Heartbeat loop. Stores the connection in _physicsConnections.
+local function _startPhysicsLoop(player, vehicle, vehicleId)
+  local cfg  = VehicleConfig[vehicleId]
+  local root = vehicle:FindFirstChild("RootPart")
+  local thrusterAttach = root and root:FindFirstChild("ThrusterAttach")
+  if not root or not thrusterAttach then
+    warn("[VehicleService] _startPhysicsLoop: missing RootPart or ThrusterAttach for", player.Name)
+    return
+  end
+
+  -- Upward lift force (XZ driven by Story 3 input)
+  local vectorForce = Instance.new("VectorForce")
+  vectorForce.Attachment0          = thrusterAttach
+  vectorForce.RelativeTo           = Enum.ActuatorRelativeTo.World
+  vectorForce.ApplyAtCenterOfMass  = false
+  vectorForce.Force                = Vector3.zero
+  vectorForce.Parent               = root
+
+  -- Orientation alignment — Mode.OneAttachment lets us drive .CFrame directly in world space
+  local alignOrientation = Instance.new("AlignOrientation")
+  alignOrientation.Mode            = Enum.OrientationAlignmentMode.OneAttachment
+  alignOrientation.Attachment0     = thrusterAttach
+  alignOrientation.RigidityEnabled = false
+  alignOrientation.Responsiveness  = 12
+  alignOrientation.CFrame          = CFrame.identity
+  alignOrientation.Parent          = root
+
+  -- Exclude the vehicle itself from its own hover raycast
+  local rayParams = RaycastParams.new()
+  rayParams.FilterType = Enum.RaycastFilterType.Exclude
+  rayParams.FilterDescendantsInstances = { vehicle }
+
+  local conn = RunService.Heartbeat:Connect(function()
+    -- Guard: vehicle may be destroyed between frames
+    if not root or not root.Parent then return end
+
+    -- 1. Altitude hold — PD controller via downward raycast
+    local rayOrigin    = root.Position
+    local rayDirection = Vector3.new(0, -(cfg.HOVER_HEIGHT + 2), 0)
+    local rayResult    = workspace:Raycast(rayOrigin, rayDirection, rayParams)
+    local dist         = rayResult and rayResult.Distance or (cfg.HOVER_HEIGHT + 2)
+    local hoverError   = cfg.HOVER_HEIGHT - dist
+    local hoverForceY  = cfg.HOVER_FORCE * hoverError * 8
+
+    -- 2. Idle bob — additive sine on Y axis
+    local bobForce = math.sin(tick() * cfg.BOB_FREQUENCY * math.pi * 2) * cfg.BOB_AMPLITUDE * cfg.HOVER_FORCE
+
+    -- 3. Apply combined vertical force:
+    --    gravity feedforward cancels weight exactly; PD term + bob fine-tune altitude.
+    --    Without feedforward the correction gain alone (~1600 max) can't lift vehicle mass.
+    local gravityComp = root.AssemblyMass * workspace.Gravity
+    vectorForce.Force = Vector3.new(0, gravityComp + hoverForceY + bobForce, 0)
+
+    -- 4. Velocity tilt — lean toward direction of travel
+    local vel = root.AssemblyLinearVelocity
+    alignOrientation.CFrame = CFrame.Angles(
+      -vel.Z * cfg.TILT_FACTOR,
+       0,
+       vel.X * cfg.TILT_FACTOR
+    )
+
+    -- 5. Max speed cap — server enforces ceiling every frame
+    local speed = vel.Magnitude
+    if speed > cfg.MAX_SPEED then
+      root.AssemblyLinearVelocity = vel.Unit * cfg.MAX_SPEED
+    end
+  end)
+
+  _physicsConnections[player] = conn
 end
 
 -- ── Public API ────────────────────────────────────────────────────────────────
@@ -169,7 +237,11 @@ function VehicleService.spawnVehicle(player, vehicleId)
 
   local cf    = spawnCFrameFor(player)
   local model = _buildPlaceholderBike(player, cf)
-  _vehicles[player] = model
+
+  _vehicles[player]     = model
+  _vehicleTypes[player] = vehicleId
+
+  _startPhysicsLoop(player, model, vehicleId)
 
   VehicleService.log.info("spawnVehicle:", player.Name, vehicleId)
   return model
@@ -222,9 +294,13 @@ function VehicleService.isMounted(player)
 end
 
 -- Destroy a player's vehicle.
--- Calls dismountPlayer first if they are mounted.
--- Removes the model from workspace and clears internal state.
+-- Disconnects physics loop, dismounts if mounted, then removes the model.
 function VehicleService.destroyVehicle(player)
+  if _physicsConnections[player] then
+    _physicsConnections[player]:Disconnect()
+    _physicsConnections[player] = nil
+  end
+
   if _mounted[player] then
     VehicleService.dismountPlayer(player)
   end
@@ -232,7 +308,8 @@ function VehicleService.destroyVehicle(player)
   local vehicle = _vehicles[player]
   if vehicle then
     vehicle:Destroy()
-    _vehicles[player] = nil
+    _vehicles[player]     = nil
+    _vehicleTypes[player] = nil
     VehicleService.log.info("destroyVehicle:", player.Name)
   end
 end
@@ -247,7 +324,6 @@ function VehicleService:start()
 
   RE.VehicleSpawnRequest.OnServerEvent:Connect(function(player, vehicleId)
     if not rateLimitOk(player) then return end
-
     if type(vehicleId) ~= "string" then return end
 
     local vehicle = VehicleService.spawnVehicle(player, vehicleId)
