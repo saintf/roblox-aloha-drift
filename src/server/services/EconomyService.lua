@@ -62,8 +62,9 @@ local function deepCopy(t)
 end
 
 -- Fills any missing keys in `data` from DEFAULT_DATA without resetting existing values.
--- Runs one level deep on nested tables (handles new roleXP roles, new stats fields, etc.).
-local function migrate(data)
+-- Handles top-level keys and one level of nested tables (roleXP roles, stats fields, etc.).
+-- Always stamps _schemaVersion so the debug report shows the canonical version.
+local function migrateData(data)
   for key, defaultValue in pairs(DEFAULT_DATA) do
     if data[key] == nil then
       data[key] = type(defaultValue) == "table" and deepCopy(defaultValue) or defaultValue
@@ -75,6 +76,7 @@ local function migrate(data)
       end
     end
   end
+  data._schemaVersion = DEFAULT_DATA._schemaVersion
   return data
 end
 
@@ -134,7 +136,7 @@ function EconomyService:start()
       data = deepCopy(DEFAULT_DATA)
       self.log.debug("new player, using default data for", player.Name)
     else
-      data = migrate(result)
+      data = migrateData(result)
       self.log.debug("loaded data for", player.Name)
     end
 
@@ -257,6 +259,16 @@ end
 function EconomyService.getCoins(player)
   local data = playerData[player.UserId]
   return data and data.personalCoins or 0
+end
+
+-- Returns a shallow copy of a player's in-memory data for debug inspection.
+-- Never expose the raw reference — callers must not mutate it.
+function EconomyService.getDataDebug(player)
+  local data = playerData[player.UserId]
+  if not data then return nil end
+  local copy = {}
+  for k, v in pairs(data) do copy[k] = v end
+  return copy
 end
 
 return EconomyService
