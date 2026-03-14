@@ -7,6 +7,7 @@
 
 local BaseService        = require(game.ReplicatedStorage.AlohaShared.classes.BaseService)
 local WindConfig         = require(game.ReplicatedStorage.AlohaShared.config.WindConfig)
+local RemoteEvents       = require(game.ReplicatedStorage.AlohaShared.RemoteEvents)
 
 local DisplacementService = BaseService.new("DisplacementService")
 
@@ -54,9 +55,19 @@ function DisplacementService.onWindHit(player, firerTeam)
 end
 
 -- Called when a player's character touches the ocean surface.
--- TODO: implement in Milestone 1, Story — Ocean surface detection
+-- Fires OceanContact remote so the client can play underwater VFX (Story 4).
+-- Teleport logic will be added in the teleportHome story.
 function DisplacementService.onOceanContact(player)
-  -- stub
+  print("[DisplacementService] onOceanContact:", player.Name)
+  -- Notify client to trigger underwater VFX (implemented in Story 4)
+  RemoteEvents.OceanContact:FireClient(player)
+end
+
+-- Called when a player falls below the world boundary (KillPlane contact).
+-- Routes to teleportHome once that is implemented.
+function DisplacementService.onBelowWorldBoundary(player)
+  print("[DisplacementService] onBelowWorldBoundary:", player.Name)
+  -- TODO: call teleportHome(player) in Milestone 1, Story — teleportHome
 end
 
 -- Teleports player to their faction's home spawn and grants invincibility.
