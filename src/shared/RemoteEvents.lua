@@ -19,7 +19,8 @@ local REMOTES = {
   -- Payload: (displaceType: "wind"|"ocean"|"boundary")
   DisplacementOccurred = "RemoteEvent",
 
-  -- Ocean contact: client notifies server player hit ocean surface
+  -- Ocean contact: SERVER fires to CLIENT to trigger underwater VFX
+  -- (Server detects swimming via Humanoid.StateChanged — client does not send this)
   -- Payload: none
   OceanContact = "RemoteEvent",
 
