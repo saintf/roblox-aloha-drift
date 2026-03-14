@@ -1,0 +1,33 @@
+{
+  "name": "AlohaD rift",
+  "tree": {
+    "$className": "DataModel",
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "AlohaServer": {
+        "$path": "src/server"
+      }
+    },
+    "StarterPlayerScripts": {
+      "$className": "StarterPlayerScripts",
+      "AlohaClient": {
+        "$path": "src/client"
+      }
+    },
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "AlohaShared": {
+        "$path": "src/shared"
+      },
+      "Packages": {
+        "$path": "Packages"
+      }
+    },
+    "TestService": {
+      "$className": "TestService",
+      "AlohaTests": {
+        "$path": "tests"
+      }
+    }
+  }
+}

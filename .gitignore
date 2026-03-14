@@ -1,0 +1,21 @@
+# Roblox Studio binary files — never commit these
+*.rbxl
+*.rbxlx
+
+# Rojo cache
+.rojo-cache/
+
+# Wally: commit Packages/ (the flat require-ready modules) but NOT _Index (raw source cache)
+Packages/_Index/
+
+# OS artefacts
+.DS_Store
+Thumbs.db
+
+# VS Code user config (keep settings.json, ignore personal extensions list)
+.vscode/extensions.json
+
+# Meshy binary exports — large files tracked separately if needed
+assets/meshes/*.obj
+assets/meshes/*.fbx
+assets/textures/*.png

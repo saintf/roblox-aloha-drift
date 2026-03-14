@@ -1,0 +1,15 @@
+{
+  "Lua.workspace.library": [],
+  "Lua.diagnostics.globals": [
+    "game", "workspace", "script", "Instance", "Vector3", "CFrame",
+    "UDim2", "Color3", "Enum", "task", "tick", "os", "math",
+    "print", "warn", "error", "require", "pairs", "ipairs",
+    "setmetatable", "getmetatable", "pcall", "xpcall",
+    "tostring", "tonumber", "table", "string", "coroutine"
+  ],
+  "Lua.runtime.version": "Lua 5.1",
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true
+}
