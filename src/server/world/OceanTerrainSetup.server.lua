@@ -15,7 +15,7 @@ local CFG = {
     -- Ocean volume
     CENTER_Y     = -2,      -- Y centre of the water volume (surface ends up at Y=0)
     WIDTH        = 4000,    -- X extent in studs
-    DEPTH        = 40,       -- how many studs thick the water volume is
+    DEPTH        = 100,       -- how many studs thick the water volume is
     LENGTH       = 4000,    -- Z extent in studs
 
     -- Optional: clear existing terrain before filling
