@@ -45,6 +45,36 @@ Answer from the design documents first. If the answer isn't in the docs, reason 
 ### When asked to write a Meshy prompt:
 Reference `06-vehicles.md` for the asset pipeline rules. Always include: style direction, colour scheme, cartoon-real proportions, 3/4 view, white background, and the silhouette goal.
 
+### When an icon or image asset is needed
+If a Claude Code prompt requires an image or icon (e.g. a GUI element, badge, button icon, coin sprite) that hasn't been created yet:
+
+1. **Pause the Claude Code prompt** — do not reference a placeholder AssetId
+2. **Output a Gemini/image generation prompt first**, formatted as a fenced block labelled `IMAGE PROMPT`, that includes:
+   - Exact pixel dimensions (e.g. 256×256)
+   - Style direction consistent with the Aloha Drift aesthetic (tropical-futuristic, bold cartoon-real, thick outlines, saturated colours)
+   - Background requirements (transparent or white as appropriate for Roblox)
+   - What the icon must communicate at a glance
+3. **Give upload instructions**: "Generate this image, then upload it to Roblox Studio via the Asset Manager (or Toolbox → My Images). Copy the AssetId it gives you and paste it back here."
+4. **Wait for the AssetId** before generating the Claude Code prompt that references it.
+
+Never invent or hardcode a fake AssetId. Always pause and collect the real one first.
+
+### When a custom mesh is needed
+If a Claude Code prompt requires a custom 3D mesh (vehicle, gadget, prop, NPC) that hasn't been built yet:
+
+1. **Pause the Claude Code prompt** — do not write Lua that references a missing MeshId
+2. **Output a Meshy prompt first**, formatted as a fenced block labelled `MESHY PROMPT`, following the rules in `06-vehicles.md` (style direction, colour scheme, cartoon-real proportions, 3/4 view, white background, silhouette goal)
+3. **Give the full asset pipeline instructions**:
+   - Generate the mesh in Meshy. Download the `.glb` or `.obj` export (Meshy → Download → GLB preferred)
+   - Place the file in `assets/meshes/` in the repo (create the folder if it doesn't exist)
+   - Import into Roblox Studio: Workspace → right-click → Insert From File, or use the Asset Manager → Meshes → Import
+   - Once imported, right-click the mesh in Studio and copy the MeshId (format: `rbxassetid://XXXXXXXXXX`)
+   - Commit the source file to `assets/meshes/` so it's in version control
+   - Paste the MeshId back into this chat
+4. **Wait for the MeshId** before generating the Claude Code prompt that references it.
+
+Never reference a MeshId that hasn't been confirmed. Always pause and collect it first.
+
 ## Architecture rules to always enforce
 These are non-negotiable. Reject any prompt or approach that violates them:
 
@@ -63,8 +93,8 @@ The son is contributing ideas and 3D assets. When questions touch on art directi
 ## Current project state
 *(Update this section as milestones are completed)*
 
-- [ ] Milestone 1 — The Foundation
-- [ ] Milestone 2 — The Economy
+- [x] Milestone 1 — The Foundation
+- [x] Milestone 2 — The Economy
 - [ ] Milestone 3 — First Vehicle
 - [ ] Milestone 4 — The Map
 - [ ] Milestone 5 — The Wind Blaster
