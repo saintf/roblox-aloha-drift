@@ -67,7 +67,8 @@ function DisplacementService.onOceanContact(player)
   RemoteEvents.OceanContact:FireClient(player)
 
   task.delay(CFG.OCEAN_DELAY, function()
-    if not player.Parent then return end  -- player left during delay
+    if not player.Parent then return end     -- player left the game
+    if not player.Character then return end  -- character destroyed mid-delay
     DisplacementService.teleportHome(player)
   end)
 end
