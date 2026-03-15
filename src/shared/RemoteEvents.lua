@@ -67,6 +67,14 @@ local REMOTES = {
   -- Payload: none
   VehicleMountRequest = "RemoteEvent",
 
+  -- Vehicle: client requests to recall their vehicle to their position
+  -- Payload: none
+  VehicleRecallRequest = "RemoteEvent",
+
+  -- Vehicle: server notifies client that a recall tween has started (for VFX)
+  -- Payload: (vehicleRootPart: BasePart, tweenDuration: number)
+  VehicleRecallStarted = "RemoteEvent",
+
   -- Vehicle: server confirms mount state change to client
   -- Payload: (isMounted: boolean, vehicleRootPart: BasePart | nil)
   VehicleMountConfirm = "RemoteEvent",

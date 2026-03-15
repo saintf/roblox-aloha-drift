@@ -1,16 +1,21 @@
 -- VehicleService.lua
--- Manages vehicle ownership, spawning, mounting, dismount, hover physics, and input.
+-- Manages vehicle ownership, spawning, mounting, dismount, hover physics, input, and recall.
 -- Server-authoritative — clients send intent via RemoteEvents, server validates and applies.
 --
--- Mount state is driven entirely by the Seat.Occupant watcher set up in spawnVehicle.
--- Both natural sitting (character walks into seat) and explicit mount (E key → VehicleMountRequest)
--- are handled by the same watcher, so _mounted[player] is always in sync with the actual seat.
+-- Story 1: spawn / mount / dismount / destroy.
+-- Story 2: altitude hold, idle bob, velocity tilt, max speed cap.
+-- Story 3: client input → _inputDir → Heartbeat applies velocity + vertical force.
+-- Story 4: vehicle recall — holds R, tween vehicle to player, 45s cooldown, teal beam VFX.
+--
+-- Mount state is driven by the Seat.Occupant watcher set up in spawnVehicle.
+-- Both natural sitting (walk into seat) and explicit mount (E → VehicleMountRequest) work.
 --
 -- Depends on: VehicleConfig, FactionService (optional — for faction colour)
 
 local CollectionService = game:GetService("CollectionService")
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
+local TweenService      = game:GetService("TweenService")
 
 local BaseService    = require(game.ReplicatedStorage.AlohaShared.classes.BaseService)
 local RemoteEvents   = require(game.ReplicatedStorage.AlohaShared.RemoteEvents)
@@ -21,11 +26,13 @@ local FactionService = require(script.Parent.FactionService)
 local VehicleService = BaseService.new("VehicleService")
 
 local CONFIG = {
-  SPAWN_OFFSET    = Vector3.new(0, 4, 8),
-  REMOTE_COOLDOWN = 0.3,
-  ASCEND_ACCEL    = 8,    -- extra upward acceleration (studs/s²) when ascending
-  ACCEL_BLEND     = 0.10, -- velocity lerp rate toward target when input held
-  DECEL_BLEND     = 0.15, -- velocity lerp rate toward zero when coasting
+  SPAWN_OFFSET      = Vector3.new(0, 4, 8),
+  REMOTE_COOLDOWN   = 0.3,
+  ASCEND_ACCEL      = 8,
+  ACCEL_BLEND       = 0.10,
+  DECEL_BLEND       = 0.15,
+  RECALL_COOLDOWN   = 45,   -- seconds between recall uses
+  RECALL_TWEEN_TIME = 4,    -- seconds for the vehicle to reach the player
 }
 
 -- ── Internal state ────────────────────────────────────────────────────────────
@@ -35,8 +42,11 @@ local _lastRemote         = {}  -- [player] = tick()
 local _physicsConnections = {}  -- [player] = Heartbeat RBXScriptConnection
 local _seatConnections    = {}  -- [player] = Seat.Occupant RBXScriptConnection
 local _vehicleTypes       = {}  -- [player] = vehicleId string
-local _inputDir           = {}  -- [player] = Vector3  raw world-space direction (-1..1 per axis)
+local _inputDir           = {}  -- [player] = Vector3  raw world-space direction (-1..1)
 local _movesReceived      = {}  -- [player] = number  (throttles first-move debug log)
+local _recallCooldowns    = {}  -- [player] = tick() of last successful recall
+local _activeRecalls      = {}  -- [player] = TweenBase (so it can be cancelled)
+local _recalling          = {}  -- [player] = boolean (physics loop paused during tween)
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -138,6 +148,8 @@ local function spawnCFrameFor(player)
   return CFrame.new(hrp.Position + offset) * CFrame.Angles(0, math.atan2(-lookUnit.X, -lookUnit.Z), 0)
 end
 
+-- Starts the per-vehicle Heartbeat physics loop.
+-- If _recalling[player] is true the loop yields so the TweenService can move the part freely.
 local function _startPhysicsLoop(player, vehicle, vehicleId)
   local cfg            = VehicleConfig[vehicleId]
   local root           = vehicle:FindFirstChild("RootPart")
@@ -147,8 +159,6 @@ local function _startPhysicsLoop(player, vehicle, vehicleId)
     return
   end
 
-  -- VectorForce handles vertical only: gravity feedforward + hover PD + bob + ascend input.
-  -- Horizontal movement is applied via AssemblyLinearVelocity (direct, guaranteed to work).
   local vectorForce = Instance.new("VectorForce")
   vectorForce.Attachment0         = thrusterAttach
   vectorForce.RelativeTo          = Enum.ActuatorRelativeTo.World
@@ -171,6 +181,12 @@ local function _startPhysicsLoop(player, vehicle, vehicleId)
   local conn = RunService.Heartbeat:Connect(function()
     if not root or not root.Parent then return end
 
+    -- Pause physics during recall — TweenService owns the CFrame
+    if _recalling[player] then
+      vectorForce.Force = Vector3.zero
+      return
+    end
+
     -- 1. Altitude hold — P controller
     local rayOrigin    = root.Position
     local rayDirection = Vector3.new(0, -(cfg.HOVER_HEIGHT + 2), 0)
@@ -182,7 +198,7 @@ local function _startPhysicsLoop(player, vehicle, vehicleId)
     -- 2. Idle bob
     local bobForce = math.sin(tick() * cfg.BOB_FREQUENCY * math.pi * 2) * cfg.BOB_AMPLITUDE * cfg.HOVER_FORCE
 
-    -- 3. Vertical VectorForce: gravity + hover PD + bob + ascend
+    -- 3. Vertical VectorForce: gravity feedforward + hover PD + bob + ascend input
     local mass        = root.AssemblyMass
     local gravityComp = mass * workspace.Gravity
     local dir         = _inputDir[player] or Vector3.zero
@@ -193,7 +209,7 @@ local function _startPhysicsLoop(player, vehicle, vehicleId)
       0
     )
 
-    -- 4. Horizontal: direct velocity control (lerp toward target speed)
+    -- 4. Horizontal: direct velocity control
     local curVel   = root.AssemblyLinearVelocity
     local targetX  = dir.X * cfg.MAX_SPEED
     local targetZ  = dir.Z * cfg.MAX_SPEED
@@ -212,7 +228,7 @@ local function _startPhysicsLoop(player, vehicle, vehicleId)
 
     root.AssemblyLinearVelocity = Vector3.new(newVelX, curVel.Y, newVelZ)
 
-    -- 5. Cosmetic tilt proportional to velocity
+    -- 5. Cosmetic tilt
     local vel = root.AssemblyLinearVelocity
     alignOrientation.CFrame = CFrame.Angles(
       -vel.Z * cfg.TILT_FACTOR,
@@ -224,13 +240,12 @@ local function _startPhysicsLoop(player, vehicle, vehicleId)
   _physicsConnections[player] = conn
 end
 
--- Sets up the bidirectional Seat.Occupant watcher for a spawned vehicle.
--- Handles both natural sitting (walk into seat) and explicit mount (seat:Sit).
--- This is the single source of truth for _mounted[player].
+-- Sets up the bidirectional Seat.Occupant watcher.
+-- Handles both natural sitting and explicit mount; single source of truth for _mounted.
 local function _watchSeat(player, vehicle)
   local seat = vehicle:FindFirstChild("Seat")
   if not seat then
-    warn("[VehicleService] _watchSeat: no Seat found in vehicle for", player.Name)
+    warn("[VehicleService] _watchSeat: no Seat in vehicle for", player.Name)
     return
   end
 
@@ -249,17 +264,15 @@ local function _watchSeat(player, vehicle)
         _inputDir[player] = nil
         local root = vehicle:FindFirstChild("RootPart") or vehicle.PrimaryPart
         RemoteEvents.VehicleMountConfirm:FireClient(player, true, root)
-        warn("[VehicleService] ▶ MOUNTED:", player.Name,
-             "| _mounted =", tostring(_mounted[player]))
+        warn("[VehicleService] ▶ MOUNTED:", player.Name)
       end
 
     else
       -- ── Stand-up / eject ──────────────────────────────────────────────────
       if _mounted[player] then
-        _mounted[player]  = nil   -- clear FIRST to prevent any re-entry
+        _mounted[player]  = nil   -- clear FIRST to prevent re-entry
         _inputDir[player] = nil
 
-        -- Reposition character above vehicle so they land on top, not inside it
         local root = vehicle:FindFirstChild("RootPart")
         local char = player.Character
         local hrp  = char and char:FindFirstChild("HumanoidRootPart")
@@ -268,8 +281,7 @@ local function _watchSeat(player, vehicle)
         end
 
         RemoteEvents.VehicleMountConfirm:FireClient(player, false, nil)
-        warn("[VehicleService] ■ DISMOUNTED (seat vacated):", player.Name,
-             "| _mounted =", tostring(_mounted[player]))
+        warn("[VehicleService] ■ DISMOUNTED (seat vacated):", player.Name)
       end
     end
   end)
@@ -277,8 +289,6 @@ end
 
 -- ── Public API ────────────────────────────────────────────────────────────────
 
--- Spawns the vehicle model and starts physics.  Does NOT auto-mount.
--- The seat watcher handles mount state when the player sits (naturally or via mountPlayer).
 function VehicleService.spawnVehicle(player, vehicleId)
   if _vehicles[player] then
     warn("[VehicleService] spawnVehicle: player already has a vehicle, ignoring.", player.Name)
@@ -294,15 +304,12 @@ function VehicleService.spawnVehicle(player, vehicleId)
   _vehicleTypes[player] = vehicleId
 
   _startPhysicsLoop(player, model, vehicleId)
-  _watchSeat(player, model)  -- bidirectional watcher, persists for vehicle lifetime
+  _watchSeat(player, model)
 
-  warn("[VehicleService] ◆ SPAWNED vehicle for", player.Name, "(", vehicleId, ")",
-       "| Press E to mount")
+  warn("[VehicleService] ◆ SPAWNED vehicle for", player.Name, "(", vehicleId, ") | E to mount")
   return model
 end
 
--- Force-seats the player in their vehicle via seat:Sit().
--- The _watchSeat listener handles _mounted and VehicleMountConfirm — nothing else needed here.
 function VehicleService.mountPlayer(player)
   local vehicle = _vehicles[player]
   if not vehicle then
@@ -315,12 +322,8 @@ function VehicleService.mountPlayer(player)
   end
 
   local seat = vehicle:FindFirstChild("Seat")
-  if not seat then
-    warn("[VehicleService] mountPlayer: vehicle has no Seat for", player.Name)
-    return
-  end
-  if seat.Occupant then
-    warn("[VehicleService] mountPlayer: seat already occupied for", player.Name)
+  if not seat or seat.Occupant then
+    warn("[VehicleService] mountPlayer: seat unavailable for", player.Name)
     return
   end
 
@@ -333,11 +336,9 @@ function VehicleService.mountPlayer(player)
 
   warn("[VehicleService] → seat:Sit called for", player.Name)
   seat:Sit(humanoid)
-  -- _watchSeat fires on Occupant change → sets _mounted = true → fires VehicleMountConfirm
+  -- _watchSeat handles _mounted and VehicleMountConfirm after Occupant changes
 end
 
--- Explicit server-side dismount (G key).
--- Clears _mounted BEFORE ejecting so the seat watcher is a no-op when it fires.
 function VehicleService.dismountPlayer(player)
   if not _mounted[player] then
     warn("[VehicleService] dismountPlayer: not mounted, ignoring.", player.Name)
@@ -352,7 +353,7 @@ function VehicleService.dismountPlayer(player)
   if vehicle then
     local seat = vehicle:FindFirstChild("Seat")
     if seat and seat.Occupant then
-      seat.Disabled = true   -- ejects occupant; watcher fires but _mounted is nil → no-op
+      seat.Disabled = true
       seat.Disabled = false
     end
 
@@ -368,6 +369,83 @@ function VehicleService.dismountPlayer(player)
   warn("[VehicleService] ■ DISMOUNT done:", player.Name)
 end
 
+-- Recalls the player's vehicle to their current position over RECALL_TWEEN_TIME seconds.
+-- The vehicle is anchored during the tween so physics cannot interfere.
+-- Fires VehicleRecallStarted to the client for beam VFX.
+function VehicleService.recallVehicle(player)
+  local vehicle = _vehicles[player]
+  if not vehicle then
+    warn("[VehicleService] recallVehicle: no vehicle for", player.Name)
+    return
+  end
+
+  if _mounted[player] then
+    warn("[VehicleService] recallVehicle: cannot recall while mounted.", player.Name)
+    return
+  end
+
+  local now       = tick()
+  local lastRecall = _recallCooldowns[player] or 0
+  if (now - lastRecall) < CONFIG.RECALL_COOLDOWN then
+    local remaining = math.ceil(CONFIG.RECALL_COOLDOWN - (now - lastRecall))
+    warn("[VehicleService] recallVehicle: on cooldown for", player.Name, "—", remaining, "s remaining")
+    return
+  end
+  _recallCooldowns[player] = now
+
+  -- Cancel any in-progress recall before starting a new one
+  if _activeRecalls[player] then
+    _activeRecalls[player]:Cancel()
+    _activeRecalls[player] = nil
+  end
+
+  local char = player.Character
+  local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+  if not hrp then
+    warn("[VehicleService] recallVehicle: no HumanoidRootPart for", player.Name)
+    return
+  end
+
+  local root = vehicle.PrimaryPart
+  if not root then
+    warn("[VehicleService] recallVehicle: vehicle has no PrimaryPart for", player.Name)
+    return
+  end
+
+  -- Target: same offset in front of player as initial spawn
+  local targetCFrame = hrp.CFrame * CFrame.new(CONFIG.SPAWN_OFFSET)
+
+  -- Pause physics, anchor part so TweenService has full control
+  _recalling[player] = true
+  root.Anchored      = true
+  -- Zero out velocity so the vehicle doesn't "carry" momentum into the tween
+  root.AssemblyLinearVelocity  = Vector3.zero
+  root.AssemblyAngularVelocity = Vector3.zero
+
+  -- Notify client before tween starts so VFX appears immediately
+  RemoteEvents.VehicleRecallStarted:FireClient(player, root, CONFIG.RECALL_TWEEN_TIME)
+
+  local tweenInfo = TweenInfo.new(
+    CONFIG.RECALL_TWEEN_TIME,
+    Enum.EasingStyle.Quad,
+    Enum.EasingDirection.Out
+  )
+  local tween = TweenService:Create(root, tweenInfo, { CFrame = targetCFrame })
+  _activeRecalls[player] = tween
+
+  tween.Completed:Connect(function()
+    _activeRecalls[player] = nil
+    -- Restore physics — player can mount via E after recall
+    _recalling[player] = false
+    root.Anchored      = false
+    warn("[VehicleService] ◎ RECALL complete for", player.Name)
+  end)
+
+  tween:Play()
+  warn("[VehicleService] ◎ RECALL started for", player.Name,
+       "| tween", CONFIG.RECALL_TWEEN_TIME, "s")
+end
+
 function VehicleService.getVehicle(player)
   return _vehicles[player]
 end
@@ -377,6 +455,12 @@ function VehicleService.isMounted(player)
 end
 
 function VehicleService.destroyVehicle(player)
+  -- Cancel any active recall first
+  if _activeRecalls[player] then
+    _activeRecalls[player]:Cancel()
+    _activeRecalls[player] = nil
+  end
+
   if _physicsConnections[player] then
     _physicsConnections[player]:Disconnect()
     _physicsConnections[player] = nil
@@ -386,7 +470,6 @@ function VehicleService.destroyVehicle(player)
     _seatConnections[player] = nil
   end
 
-  -- If mounted, tell the client before destroying
   if _mounted[player] then
     _mounted[player]  = nil
     _inputDir[player] = nil
@@ -399,6 +482,8 @@ function VehicleService.destroyVehicle(player)
     _vehicles[player]      = nil
     _vehicleTypes[player]  = nil
     _inputDir[player]      = nil
+    _recalling[player]     = nil
+    _recallCooldowns[player] = nil
     _movesReceived[player] = nil
     warn("[VehicleService] ✕ DESTROYED vehicle for", player.Name)
   end
@@ -412,26 +497,27 @@ end
 function VehicleService:start()
   local RE = RemoteEvents
 
-  -- F key: spawn only (no auto-mount)
   RE.VehicleSpawnRequest.OnServerEvent:Connect(function(player, vehicleId)
     if not rateLimitOk(player) then return end
     if type(vehicleId) ~= "string" then return end
     VehicleService.spawnVehicle(player, vehicleId)
   end)
 
-  -- E key (when not mounted): force-sit player in their vehicle
   RE.VehicleMountRequest.OnServerEvent:Connect(function(player)
     if not rateLimitOk(player) then return end
     VehicleService.mountPlayer(player)
   end)
 
-  -- G key: explicit dismount
   RE.VehicleDismountRequest.OnServerEvent:Connect(function(player)
     if not rateLimitOk(player) then return end
     VehicleService.dismountPlayer(player)
   end)
 
-  -- Move input: no time-based rate limit (client throttles to 20 Hz); magnitude guard is anti-exploit.
+  RE.VehicleRecallRequest.OnServerEvent:Connect(function(player)
+    -- No rate-limit here — recallVehicle has its own 45s cooldown check
+    VehicleService.recallVehicle(player)
+  end)
+
   RE.VehicleMoveRequest.OnServerEvent:Connect(function(player, inputVector)
     if not _mounted[player] then return end
     if typeof(inputVector) ~= "Vector3" then return end
