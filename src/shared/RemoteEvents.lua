@@ -55,6 +55,21 @@ local REMOTES = {
   -- Vehicle: client requests to dismount from their current vehicle
   -- Payload: none
   VehicleDismountRequest = "RemoteEvent",
+
+  -- Vehicle: client sends movement intent to server each input tick
+  -- Payload: (inputVector: Vector3)
+  --   inputVector.X = world-space strafe  (-1 to 1)
+  --   inputVector.Z = world-space fwd/back (-1 to 1, negative = forward)
+  --   inputVector.Y = ascend/descend       (-1, 0, or 1)
+  VehicleMoveRequest = "RemoteEvent",
+
+  -- Vehicle: client requests to mount (sit in) their current vehicle
+  -- Payload: none
+  VehicleMountRequest = "RemoteEvent",
+
+  -- Vehicle: server confirms mount state change to client
+  -- Payload: (isMounted: boolean, vehicleRootPart: BasePart | nil)
+  VehicleMountConfirm = "RemoteEvent",
 }
 
 -- Create or find the container folder
