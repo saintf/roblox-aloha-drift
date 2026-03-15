@@ -33,6 +33,9 @@ local CONFIG = {
   DECEL_BLEND       = 0.15,
   RECALL_COOLDOWN   = 45,   -- seconds between recall uses
   RECALL_TWEEN_TIME = 4,    -- seconds for the vehicle to reach the player
+  FALL_DISMOUNT_Y   = 60,   -- Y below which a mounted player is auto-dismounted mid-air
+  KILL_Y            = -20,  -- Y below which the vehicle is destroyed (kill-plane backstop)
+  OCEAN_Y           = 2,    -- Y at/below which the vehicle is treated as ocean contact
 }
 
 -- ── Internal state ────────────────────────────────────────────────────────────
@@ -180,6 +183,26 @@ local function _startPhysicsLoop(player, vehicle, vehicleId)
 
   local conn = RunService.Heartbeat:Connect(function()
     if not root or not root.Parent then return end
+
+    -- ── Altitude / boundary checks — always run, even during recall ───────────
+    local rootY = root.Position.Y
+
+    -- Auto-dismount when vehicle falls below safe altitude.
+    -- Player detaches and falls freely; OceanContactHandler catches them in the water.
+    if rootY < CONFIG.FALL_DISMOUNT_Y and _mounted[player] then
+      warn("[VehicleService] ⚠ FALL DISMOUNT: vehicle below Y", CONFIG.FALL_DISMOUNT_Y,
+           "for", player.Name)
+      VehicleService.dismountPlayer(player)
+    end
+
+    -- Destroy vehicle on ocean contact (Terrain water) or absolute kill plane.
+    -- Uses a Y-threshold because the ocean is Terrain water, not a touch-able Part.
+    if rootY <= CONFIG.OCEAN_Y or rootY < CONFIG.KILL_Y then
+      warn("[VehicleService] ⚠ VEHICLE OCEAN/KILL: destroying vehicle for", player.Name,
+           "at Y =", math.floor(rootY))
+      VehicleService.destroyVehicle(player)
+      return  -- root is destroyed; stop this Heartbeat invocation
+    end
 
     -- Pause physics during recall — TweenService owns the CFrame
     if _recalling[player] then
